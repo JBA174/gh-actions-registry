@@ -68,7 +68,6 @@ is_action_repo() {
 }
 
 fetch_actions_repos() {
-  local filter="${1:-}"
   local page=1
   local repos=()
 
@@ -79,9 +78,7 @@ fetch_actions_repos() {
     mapfile -t names < <(printf '%s' "$batch" | jq -r '.[].full_name // empty' | tr -d '\r')
     [[ ${#names[@]} -eq 0 ]] && break
 
-    for name in "${names[@]}"; do
-      [[ -z "$filter" || "$name" == *"$filter"* ]] && repos+=("$name")
-    done
+    repos+=("${names[@]}")
     (( page++ ))
   done
 
@@ -166,6 +163,45 @@ print_row() {
 }
 
 # ---------------------------------------------------------------------------
+# Cache
+# ---------------------------------------------------------------------------
+CACHE_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.actions-cache"
+CACHE_TTL_SECONDS=86400   # 24 hours
+
+cache_is_valid() {
+  local file="$1"
+  [[ -f "$file" ]] || return 1
+  local now modified age
+  now=$(date +%s)
+  if date --version &>/dev/null 2>&1; then
+    modified=$(date -r "$file" +%s 2>/dev/null) || return 1
+  else
+    modified=$(stat -f '%m' "$file" 2>/dev/null) || return 1
+  fi
+  age=$(( now - modified ))
+  (( age < CACHE_TTL_SECONDS ))
+}
+
+cache_read() {
+  local filter="$1"
+  local all_results
+  mapfile -t all_results < "$CACHE_FILE"
+  if [[ -z "$filter" ]]; then
+    RESULTS=("${all_results[@]}")
+  else
+    RESULTS=()
+    local entry
+    for entry in "${all_results[@]}"; do
+      [[ "$entry" == *"$filter"* ]] && RESULTS+=("$entry")
+    done
+  fi
+}
+
+cache_write() {
+  printf '%s\n' "${RESULTS[@]}" > "$CACHE_FILE"
+}
+
+# ---------------------------------------------------------------------------
 # Dependency check
 # ---------------------------------------------------------------------------
 check_deps() {
@@ -187,7 +223,6 @@ check_deps() {
 check_deps
 
 FILTER="${1:-}"
-mapfile -t ACTIONS < <(fetch_actions_repos "$FILTER")
 
 echo ""
 echo -e "${BOLD}${CYAN}  GitHub Actions — Latest Versions${RESET}"
@@ -197,17 +232,34 @@ fi
 echo ""
 
 declare -a RESULTS=()
-for i in "${!ACTIONS[@]}"; do
-  printf "${CLEAR_LINE}  ${CYAN}Fetching${RESET} (%d/%d) %s..." "$((i + 1))" "${#ACTIONS[@]}" "${ACTIONS[$i]}"
-  result=$(get_latest_release "${ACTIONS[$i]}")
-  tag="${result%%|*}"
-  published="${result##*|}"
-  [[ -n "$tag" ]] && RESULTS+=("${ACTIONS[$i]}|${tag}|${published}")
-done
-printf "${CLEAR_LINE}"
+if cache_is_valid "$CACHE_FILE"; then
+  echo -e "  ${GREY}Using cached results (< 24 h old). Delete .actions-cache to force refresh.${RESET}"
+  echo ""
+  cache_read "$FILTER"
+else
+  mapfile -t ACTIONS < <(fetch_actions_repos)
 
-if [[ ${#RESULTS[@]} -gt 0 ]]; then
-  mapfile -t RESULTS < <(printf '%s\n' "${RESULTS[@]}" | sort)
+  for i in "${!ACTIONS[@]}"; do
+    printf "${CLEAR_LINE}  ${CYAN}Fetching${RESET} (%d/%d) %s..." "$((i + 1))" "${#ACTIONS[@]}" "${ACTIONS[$i]}"
+    result=$(get_latest_release "${ACTIONS[$i]}")
+    tag="${result%%|*}"
+    published="${result##*|}"
+    [[ -n "$tag" ]] && RESULTS+=("${ACTIONS[$i]}|${tag}|${published}")
+  done
+  printf "${CLEAR_LINE}"
+
+  if [[ ${#RESULTS[@]} -gt 0 ]]; then
+    mapfile -t RESULTS < <(printf '%s\n' "${RESULTS[@]}" | sort)
+    cache_write
+    # Apply filter to the freshly fetched full set
+    if [[ -n "$FILTER" ]]; then
+      local_filtered=()
+      for entry in "${RESULTS[@]}"; do
+        [[ "$entry" == *"$FILTER"* ]] && local_filtered+=("$entry")
+      done
+      RESULTS=("${local_filtered[@]:-}")
+    fi
+  fi
 fi
 
 if [[ ${#RESULTS[@]} -eq 0 ]]; then
