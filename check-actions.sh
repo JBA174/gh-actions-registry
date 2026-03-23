@@ -81,8 +81,7 @@ fetch_actions_repos() {
     (( page++ ))
   done
   if [[ ${#repos[@]} -eq 0 ]]; then
-    echo -e "${FG_RED}Error: failed to fetch repos from github.com/orgs/actions — check your network or GITHUB_TOKEN${RESET}" >&2
-    exit 1
+    return 0
   fi
   # Filter to repos that actually have action.yml / action.yaml
   local repo
@@ -231,11 +230,6 @@ FILTER="${1:-}"
 
 mapfile -t ACTIONS < <(fetch_actions_repos "$FILTER")
 
-if [[ ${#ACTIONS[@]} -eq 0 ]]; then
-  echo -e "${FG_RED}No actions/ repos match filter: ${FILTER}${RESET}" >&2
-  exit 1
-fi
-
 # Column widths
 COL_ACTION=42
 COL_VERSION=20
@@ -261,53 +255,46 @@ for action in "${ACTIONS[@]}"; do
   result=$(get_latest_release "$action")
   tag="${result%%|*}"
   published="${result##*|}"
-  RESULTS+=("${action}|${tag:-N/A}|${published}")
+  [[ -z "$tag" ]] && continue
+  RESULTS+=("${action}|${tag}|${published}")
 done
 
 printf '\033[2K\r'   # clear the progress line
 
 # Sort results alphabetically by action name
-mapfile -t RESULTS < <(printf '%s\n' "${RESULTS[@]}" | sort)
+if [[ ${#RESULTS[@]} -gt 0 ]]; then
+  mapfile -t RESULTS < <(printf '%s\n' "${RESULTS[@]}" | sort)
+fi
 
 # Print table
-if [[ ${#ACTIONS[@]} -gt 1 ]]; then
-  # Multi-action table with colored version dates
-  print_header "$COL_ACTION" "$COL_VERSION" "$COL_DATE"
-
-  for entry in "${RESULTS[@]}"; do
-    IFS='|' read -r action tag published <<< "$entry"
-    color=$(age_color "$published")
-
-    # Format published date for display (trim time part if present)
-    disp_date="${published%%T*}"
-    [[ -z "$disp_date" ]] && disp_date="unknown"
-
-    printf "${FG_GREY}| ${RESET}"
-    printf "${FG_WHITE}%-*s${RESET}" "$COL_ACTION" "$(pad "$action" "$COL_ACTION")"
-    printf " ${FG_GREY}|${RESET} "
-    printf "${color}${BOLD}%-*s${RESET}" "$COL_VERSION" "$(pad "$tag" "$COL_VERSION")"
-    printf " ${FG_GREY}|${RESET} "
-    printf "${color}%-*s${RESET}" "$COL_DATE" "$(pad "$disp_date" "$COL_DATE")"
-    printf " ${FG_GREY}|${RESET}\n"
-  done
-
-  print_separator "$COL_ACTION" "$COL_VERSION" "$COL_DATE"
-
-  # Legend
+if [[ ${#RESULTS[@]} -eq 0 ]]; then
+  echo -e "${FG_RED}No actions found${FILTER:+ matching '${FILTER}'}.${RESET}"
   echo ""
-  echo -e "  Legend:  ${FG_GREEN}${BOLD}■${RESET} ≤ 14 days   ${FG_YELLOW}${BOLD}■${RESET} ≤ 30 days   ${FG_GREY}■${RESET} > 30 days   ${FG_WHITE}■${RESET} date unknown"
-  echo ""
+  exit 0
+fi
 
-else
-  # Single-action: show a compact detail view
-  entry="${RESULTS[0]:-}"
+print_header "$COL_ACTION" "$COL_VERSION" "$COL_DATE"
+
+for entry in "${RESULTS[@]}"; do
   IFS='|' read -r action tag published <<< "$entry"
   color=$(age_color "$published")
+
+  # Format published date for display (trim time part if present)
   disp_date="${published%%T*}"
   [[ -z "$disp_date" ]] && disp_date="unknown"
 
-  echo -e "  ${BOLD}Action   :${RESET}  ${FG_CYAN}${action}${RESET}"
-  echo -e "  ${BOLD}Version  :${RESET}  ${color}${BOLD}${tag}${RESET}"
-  echo -e "  ${BOLD}Published:${RESET}  ${color}${disp_date}${RESET}"
-  echo ""
-fi
+  printf "${FG_GREY}| ${RESET}"
+  printf "${FG_WHITE}%-*s${RESET}" "$COL_ACTION" "$(pad "$action" "$COL_ACTION")"
+  printf " ${FG_GREY}|${RESET} "
+  printf "${color}${BOLD}%-*s${RESET}" "$COL_VERSION" "$(pad "$tag" "$COL_VERSION")"
+  printf " ${FG_GREY}|${RESET} "
+  printf "${color}%-*s${RESET}" "$COL_DATE" "$(pad "$disp_date" "$COL_DATE")"
+  printf " ${FG_GREY}|${RESET}\n"
+done
+
+print_separator "$COL_ACTION" "$COL_VERSION" "$COL_DATE"
+
+# Legend
+echo ""
+echo -e "  Legend:  ${FG_GREEN}${BOLD}■${RESET} ≤ 14 days   ${FG_YELLOW}${BOLD}■${RESET} ≤ 30 days   ${FG_GREY}■${RESET} > 30 days   ${FG_WHITE}■${RESET} date unknown"
+echo ""
