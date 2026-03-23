@@ -72,7 +72,7 @@ fetch_actions_repos() {
   local page=1
   local repos=()
 
-  while :; do
+  while true; do
     local batch
     batch=$(github_api "https://api.github.com/orgs/actions/repos?type=public&per_page=100&page=${page}" 2>/dev/null) || break
     local names
