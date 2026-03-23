@@ -10,188 +10,17 @@
 
 set -euo pipefail
 
-# ---------------------------------------------------------------------------
-# Colors
-# ---------------------------------------------------------------------------
-RESET='\033[0m'
-BOLD='\033[1m'
-GREEN='\033[32m'
-YELLOW='\033[33m'
-CYAN='\033[36m'
-WHITE='\033[37m'
-GREY='\033[90m'
-RED='\033[31m'
-BG_BLUE='\033[44m'
-CLEAR_LINE='\033[2K\r'
-
-COL_ACTION=42
-COL_VERSION=20
-COL_DATE=25
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ---------------------------------------------------------------------------
-# GitHub API
+# Libraries
 # ---------------------------------------------------------------------------
-github_api() {
-  local url="$1"
-  local auth_args=()
-  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-    auth_args=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
-  fi
-  curl -fsSL \
-    -H "Accept: application/vnd.github+json" \
-    -H "X-GitHub-Api-Version: 2022-11-28" \
-    "${auth_args[@]+"${auth_args[@]}"}" \
-    "$url"
-}
-
-github_api_status() {
-  local url="$1"
-  local auth_args=()
-  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-    auth_args=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
-  fi
-  curl -o /dev/null -sSL -w '%{http_code}' \
-    -H "Accept: application/vnd.github+json" \
-    -H "X-GitHub-Api-Version: 2022-11-28" \
-    "${auth_args[@]+"${auth_args[@]}"}" \
-    "$url" 2>/dev/null
-}
-
-# ---------------------------------------------------------------------------
-# Repo inspection
-# ---------------------------------------------------------------------------
-is_action_repo() {
-  local repo="$1"
-  [[ "$(github_api_status "https://api.github.com/repos/${repo}/contents/action.yml")" == "200" ]] && return 0
-  [[ "$(github_api_status "https://api.github.com/repos/${repo}/contents/action.yaml")" == "200" ]] && return 0
-  return 1
-}
-
-fetch_actions_repos() {
-  local page=1
-  local repos=()
-
-  while true; do
-    local batch
-    batch=$(github_api "https://api.github.com/orgs/actions/repos?type=public&per_page=100&page=${page}" 2>/dev/null) || break
-    local names
-    mapfile -t names < <(printf '%s' "$batch" | jq -r '.[].full_name // empty' | tr -d '\r')
-    [[ ${#names[@]} -eq 0 ]] && break
-
-    repos+=("${names[@]}")
-    (( page++ ))
-  done
-
-  [[ ${#repos[@]} -eq 0 ]] && return 0
-
-  local total=${#repos[@]}
-  for i in "${!repos[@]}"; do
-    printf "${CLEAR_LINE}  ${CYAN}Checking${RESET} (%d/%d) %s..." "$((i + 1))" "$total" "${repos[$i]}" >&2
-    is_action_repo "${repos[$i]}" && printf '%s\n' "${repos[$i]}"
-  done
-  printf "${CLEAR_LINE}" >&2
-}
-
-get_latest_release() {
-  local repo="$1"
-  local response tag published
-
-  response=$(github_api "https://api.github.com/repos/${repo}/releases/latest" 2>/dev/null) || true
-  tag=$(printf '%s' "$response" | jq -r '.tag_name // empty' | tr -d '\r')
-  published=$(printf '%s' "$response" | jq -r '.published_at // empty' | tr -d '\r')
-
-  if [[ -z "$tag" ]]; then
-    response=$(github_api "https://api.github.com/repos/${repo}/tags?per_page=1" 2>/dev/null) || true
-    tag=$(printf '%s' "$response" | jq -r '.[0].name // empty' | tr -d '\r')
-    published=""
-  fi
-
-  echo "${tag}|${published}"
-}
-
-# ---------------------------------------------------------------------------
-# Display helpers
-# ---------------------------------------------------------------------------
-age_color() {
-  local published="$1"
-  if [[ -z "$published" ]]; then
-    echo -n "$WHITE"
-    return
-  fi
-
-  local epoch_published epoch_now age_days
-  epoch_published=$(date -d "$published" +%s 2>/dev/null) || { echo -n "$WHITE"; return; }
-
-  epoch_now=$(date +%s)
-  age_days=$(( (epoch_now - epoch_published) / 86400 ))
-
-  if   (( age_days <= 14 )); then echo -n "$GREEN"
-  elif (( age_days <= 30 )); then echo -n "$YELLOW"
-  else                            echo -n "$GREY"
-  fi
-}
-
-print_separator() {
-  printf "${GREY}+-%-*s-+-%-*s-+-%-*s-+${RESET}\n" \
-    "$COL_ACTION" "$(printf '%*s' "$COL_ACTION" '' | tr ' ' '-')" \
-    "$COL_VERSION" "$(printf '%*s' "$COL_VERSION" '' | tr ' ' '-')" \
-    "$COL_DATE" "$(printf '%*s' "$COL_DATE" '' | tr ' ' '-')"
-}
-
-print_header() {
-  print_separator
-  printf "${BG_BLUE}${BOLD}${WHITE}| %-*s | %-*s | %-*s |${RESET}\n" \
-    "$COL_ACTION" "Action" "$COL_VERSION" "Latest Version" "$COL_DATE" "Published"
-  print_separator
-}
-
-print_row() {
-  local action="$1" tag="$2" published="$3"
-  local color disp_date
-  color=$(age_color "$published")
-  disp_date="${published%%T*}"
-  [[ -z "$disp_date" ]] && disp_date="unknown"
-
-  printf "${GREY}|${RESET} ${WHITE}%-*s${RESET} " "$COL_ACTION" "$action"
-  printf "${GREY}|${RESET} ${color}${BOLD}%-*s${RESET} " "$COL_VERSION" "$tag"
-  printf "${GREY}|${RESET} ${color}%-*s${RESET} " "$COL_DATE" "$disp_date"
-  printf "${GREY}|${RESET}\n"
-}
-
-# ---------------------------------------------------------------------------
-# Cache
-# ---------------------------------------------------------------------------
-CACHE_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.actions-cache"
-CACHE_TTL_SECONDS=86400   # 24 hours
-
-cache_is_valid() {
-  local file="$1"
-  [[ -f "$file" ]] || return 1
-  local now modified age
-  now=$(date +%s)
-  modified=$(date -r "$file" +%s 2>/dev/null) || return 1
-  age=$(( now - modified ))
-  (( age < CACHE_TTL_SECONDS ))
-}
-
-cache_read() {
-  local filter="$1"
-  local all_results
-  mapfile -t all_results < "$CACHE_FILE"
-  if [[ -z "$filter" ]]; then
-    RESULTS=("${all_results[@]}")
-  else
-    RESULTS=()
-    local entry
-    for entry in "${all_results[@]}"; do
-      [[ "$entry" == *"$filter"* ]] && RESULTS+=("$entry")
-    done
-  fi
-}
-
-cache_write() {
-  printf '%s\n' "${RESULTS[@]}" > "$CACHE_FILE"
-}
+# shellcheck source=lib/api.sh
+source "${SCRIPT_DIR}/lib/api.sh"
+# shellcheck source=lib/cache.sh
+source "${SCRIPT_DIR}/lib/cache.sh"
+# shellcheck source=lib/display.sh
+source "${SCRIPT_DIR}/lib/display.sh"
 
 # ---------------------------------------------------------------------------
 # Dependency check
@@ -218,13 +47,12 @@ FILTER="${1:-}"
 
 echo ""
 echo -e "${BOLD}${CYAN}  GitHub Actions — Latest Versions${RESET}"
-if [[ -z "${GITHUB_TOKEN:-}" ]]; then
+[[ -z "${GITHUB_TOKEN:-}" ]] && \
   echo -e "  ${YELLOW}Tip: set GITHUB_TOKEN to avoid rate-limiting (60 req/h unauthenticated)${RESET}"
-fi
 echo ""
 
 declare -a RESULTS=()
-if cache_is_valid "$CACHE_FILE"; then
+if cache_is_valid; then
   echo -e "  ${GREY}Using cached results (< 24 h old). Delete .actions-cache to force refresh.${RESET}"
   echo ""
   cache_read "$FILTER"
@@ -243,7 +71,6 @@ else
   if [[ ${#RESULTS[@]} -gt 0 ]]; then
     mapfile -t RESULTS < <(printf '%s\n' "${RESULTS[@]}" | sort)
     cache_write
-    # Apply filter to the freshly fetched full set
     if [[ -n "$FILTER" ]]; then
       local_filtered=()
       for entry in "${RESULTS[@]}"; do
@@ -266,7 +93,4 @@ for entry in "${RESULTS[@]}"; do
   print_row "$action" "$tag" "$published"
 done
 print_separator
-
-echo ""
-echo -e "  Legend:  ${GREEN}${BOLD}■${RESET} ≤ 14 days   ${YELLOW}${BOLD}■${RESET} ≤ 30 days   ${GREY}■${RESET} > 30 days   ${WHITE}■${RESET} date unknown"
-echo ""
+print_legend
