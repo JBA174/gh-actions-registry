@@ -12,9 +12,9 @@ RED='\033[31m'
 BG_BLUE='\033[44m'
 CLEAR_LINE='\033[2K\r'
 
-COL_ACTION=42
-COL_VERSION=20
-COL_DATE=25
+COL_ACTION_WIDTH=42
+COL_VERSION_WIDTH=20
+COL_DATE_WIDTH=25
 
 age_color() {
   local published="$1"
@@ -33,15 +33,15 @@ age_color() {
 
 print_separator() {
   printf "${GREY}+-%-*s-+-%-*s-+-%-*s-+${RESET}\n" \
-    "$COL_ACTION"  "$(printf '%*s' "$COL_ACTION"  '' | tr ' ' '-')" \
-    "$COL_VERSION" "$(printf '%*s' "$COL_VERSION" '' | tr ' ' '-')" \
-    "$COL_DATE"    "$(printf '%*s' "$COL_DATE"    '' | tr ' ' '-')"
+    "$COL_ACTION_WIDTH"  "$(printf '%*s' "$COL_ACTION_WIDTH"  '' | tr ' ' '-')" \
+    "$COL_VERSION_WIDTH" "$(printf '%*s' "$COL_VERSION_WIDTH" '' | tr ' ' '-')" \
+    "$COL_DATE_WIDTH"    "$(printf '%*s' "$COL_DATE_WIDTH"    '' | tr ' ' '-')"
 }
 
 print_header() {
   print_separator
   printf "${BG_BLUE}${BOLD}${WHITE}| %-*s | %-*s | %-*s |${RESET}\n" \
-    "$COL_ACTION" "Action" "$COL_VERSION" "Latest Version" "$COL_DATE" "Published"
+    "$COL_ACTION_WIDTH" "Action" "$COL_VERSION_WIDTH" "Latest Version" "$COL_DATE_WIDTH" "Published"
   print_separator
 }
 
@@ -58,8 +58,8 @@ print_row() {
   disp_date="${published%%T*}"
   [[ -z "$disp_date" ]] && disp_date="unknown"
 
-  printf "${GREY}|${RESET} ${WHITE}%-*s${RESET} " "$COL_ACTION" "$action"
-  printf "${GREY}|${RESET} ${color}${BOLD}%-*s${RESET} " "$COL_VERSION" "$tag"
-  printf "${GREY}|${RESET} ${color}%-*s${RESET} " "$COL_DATE" "$disp_date"
+  printf "${GREY}|${RESET} ${WHITE}%-*s${RESET} " "$COL_ACTION_WIDTH" "$action"
+  printf "${GREY}|${RESET} ${color}${BOLD}%-*s${RESET} " "$COL_VERSION_WIDTH" "$tag"
+  printf "${GREY}|${RESET} ${color}%-*s${RESET} " "$COL_DATE_WIDTH" "$disp_date"
   printf "${GREY}|${RESET}\n"
 }

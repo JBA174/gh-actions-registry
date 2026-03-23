@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # lib/cache.sh — Single-file result cache with a 24-hour TTL
 
-CACHE_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.actions-cache"
+CACHE_FILE="${BASH_SOURCE[0]%/lib/cache.sh}/.actions-cache"
 CACHE_TTL_SECONDS=86400   # 24 hours
 
 cache_is_valid() {
