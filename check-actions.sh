@@ -120,11 +120,7 @@ age_color() {
   fi
 
   local epoch_published epoch_now age_days
-  if date --version &>/dev/null 2>&1; then
-    epoch_published=$(date -d "$published" +%s 2>/dev/null) || { echo -n "$WHITE"; return; }
-  else
-    epoch_published=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$published" +%s 2>/dev/null) || { echo -n "$WHITE"; return; }
-  fi
+  epoch_published=$(date -d "$published" +%s 2>/dev/null) || { echo -n "$WHITE"; return; }
 
   epoch_now=$(date +%s)
   age_days=$(( (epoch_now - epoch_published) / 86400 ))
@@ -173,11 +169,7 @@ cache_is_valid() {
   [[ -f "$file" ]] || return 1
   local now modified age
   now=$(date +%s)
-  if date --version &>/dev/null 2>&1; then
-    modified=$(date -r "$file" +%s 2>/dev/null) || return 1
-  else
-    modified=$(stat -f '%m' "$file" 2>/dev/null) || return 1
-  fi
+  modified=$(date -r "$file" +%s 2>/dev/null) || return 1
   age=$(( now - modified ))
   (( age < CACHE_TTL_SECONDS ))
 }
